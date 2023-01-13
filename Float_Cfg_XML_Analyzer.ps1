@@ -22,16 +22,16 @@ $null = $FileBrowser.ShowDialog()
 #assign variable for input file
 $XMLInput = $filebrowser.filename
 
-#strip .xml from output file (put it back in on save)
+#strip extension from output file
 $OutputFile = $XMLInput -replace ".{4}$"
 
-#get config file content
+#get float config file content
 $configxml = [xml](Get-Content $XMLInput)
 
 #Download latest settings.xml file 
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/vedderb/vesc_pkg/main/float/float/conf/settings.xml" -Outfile .\settings.xml
 
-#Download Defaults file
+#Download Defaults file then filter it
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/vedderb/vesc_pkg/main/float/float/conf/conf_default.h" -Outfile .\conf_default.h
 
 $defaults = (Get-Content .\conf_default.h)
@@ -47,6 +47,7 @@ $Output = @()
 #grab settings names
 $settings = $settingsxml.ConfigParams.Params | get-member -MemberType Property | Select-Object Name 
 
+#declare colors
 $redStyle = 'style="background-color:Red"'
 $yellowStyle = 'style="background-color:Yellow"'
 $greenStyle = 'style="background-color:Green"'
@@ -56,13 +57,13 @@ $greenStyle = 'style="background-color:Green"'
 foreach ($setting in $settings) {
   #grab description for recommended range and clean up
   $description = $settingsxml.ConfigParams.Params.($setting.name).description
-  $description2 = $description -replace '<[^>]+>',''
-  $recommended = $description2 | Select-String -Pattern "Recommended Values:.*\d" | % {$_.Matches.Value}
+  $description = $description -replace '<[^>]+>',''
+  $recommended = $description | Select-String -Pattern "Recommended Values:.*\d" | % {$_.Matches.Value}
 
   #clean up description output
-  $desctrim = $description2.Trim()
-  $desctrim2 = $desctrim.Trimstart('p, li { white-space: pre-wrap; }')
-  $desctrim3 = $desctrim2.Trim()
+  $desctrim = $description.Trim()
+  $desctrim = $desctrim.Trimstart('p, li { white-space: pre-wrap; }')
+  $desctrim = $desctrim.Trim()
   
   #get default settings
   $searchstr = $settingsxml.ConfigParams.Params.($setting.name).cDefine
@@ -75,23 +76,39 @@ foreach ($setting in $settings) {
   $configvalue = $configxml.CustomConfiguration.($setting.name)
 
   #Add to array
-  $output += New-Object PsObject -Property ([ordered]@{'Parameter Name' = $setting.name;'Default Value' = $defaultvalue;'Current Value' = $configvalue;'Recommended Value' = $recommended;'Help Description' = $desctrim3})
+  $output += New-Object PsObject -Property ([ordered]@{'Parameter Name' = $setting.name;'Default Value' = $defaultvalue;'Current Value' = $configvalue;'Recommended Value' = $recommended;'Help Description' = $desctrim})
 
 }
 
 
+#Code for HTML color, credit here: https://petri.com/adding-style-powershell-html-reports/
+$fragments = @()
 
-#Header for HTML export
-$Header = @"
-<style>
-TABLE {margin: auto; border-width: 1px; border-style: solid; border-color: black; border-collapse: collapse;}
-TD {border-width: 1px; padding: 3px; border-style: solid; border-color: black;}
-.red    {background-color: #ff0000; text-align: right;}
-.yellow {background-color: #ffcc00; text-align: right;}
-.green  {background-color: #33cc00; text-align: right;}
-</style>
+[xml]$html = $Output | ConvertTo-Html -Fragment
+
+for ($i=1;$i -le $html.table.tr.count-1;$i++) {
+  if ($html.table.tr[$i].td[2] -ne $html.table.tr[$i].td[1]) {
+    $class = $html.CreateAttribute("class")
+    $class.value = 'red'
+    $html.table.tr[$i].childnodes[2].attributes.append($class) | out-null
+  }
+}
+
+$fragments+= $html.InnerXml
+
+#Content for HTML export
+$convertParams = @{
+  head = @"
+  <style>
+    TABLE {margin: auto; border-width: 1px; border-style: solid; border-color: black; border-collapse: collapse;}
+    TD {border-width: 1px; padding: 3px; border-style: solid; border-color: black;}
+    .red    {background-color: #ff0000; text-align: right;}
+    .yellow {background-color: #ffcc00; text-align: right;}
+    .green  {background-color: #33cc00; text-align: right;}
+  </style>
 "@
+body = $fragments
+}
 
 
-
-$Output | ConvertTo-Html -Head $Header | Out-File $outputfile"_analyzer.html"
+ConvertTo-Html @convertParams | Out-File $outputfile"_analyzer.html"
